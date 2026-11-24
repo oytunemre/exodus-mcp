@@ -47,7 +47,8 @@ public static class ServiceCollectionExtensions
                 // Customer prompts and resources go here.
                 break;
             case ExodusProfile.Seller:
-                // Seller tools, prompts and resources go here.
+                builder.WithTools<SellerTools>();
+                // Seller prompts and resources go here.
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(options), options.Profile, "Unknown Exodus profile.");
