@@ -1,19 +1,23 @@
 using System.ComponentModel;
 using Exodus.Mcp.Core.Api;
 using Exodus.Mcp.Core.Api.Dtos;
+using Exodus.Mcp.Core.Auth;
 using Exodus.Mcp.Core.Configuration;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
 namespace Exodus.Mcp.Core.Tools;
 
 /// <summary>Customer-profile tools (catalog, addresses, orders).</summary>
 [McpServerToolType]
-public sealed class CustomerTools(ExodusApiClient api, ExodusOptions options)
+public sealed class CustomerTools(ExodusApiClient api, ExodusOptions options, TokenStore tokens)
 {
     private const int PageSize = 10;
     private static readonly string[] SortBys = ["price", "newest", "name"];
     private static readonly string[] SortOrders = ["asc", "desc"];
     private static readonly string[] Conditions = ["New", "LikeNew", "Used", "Refurbished"];
+    private static readonly string[] CancelReasons =
+        ["CustomerRequest", "OutOfStock", "PaymentFailed", "FraudSuspected", "SellerCancelled", "DeliveryIssue", "Other"];
     private static readonly string[] OrderStatuses =
         ["Pending", "Processing", "Confirmed", "Shipped", "Delivered", "Completed", "Cancelled", "Refunded", "PartialRefund", "Failed"];
 
@@ -94,14 +98,109 @@ public sealed class CustomerTools(ExodusApiClient api, ExodusOptions options)
         return ToolErrors.RunAsync(options, async () =>
         {
             ToolInput.Require((orderId is not null) ^ (number is not null), "orderId ve orderNumber'dan tam olarak biri verilmeli.");
-            var o = orderId is { } id ? await api.GetOrderAsync(id, ct) : await api.GetOrderByNumberAsync(number!, ct);
-            return new OrderView(o.Id, o.OrderNumber, o.Status, o.TotalAmount, o.Currency, o.CreatedAt, o.PaidAt, o.ShippedAt, o.DeliveredAt,
-                o.ShippingAddress,
-                (o.SellerOrders ?? []).Select(s => new SellerOrderView(s.Id, s.SellerName, s.Status, s.Total,
-                    (s.Items ?? []).Select(i => new OrderItemView(i.ProductName, i.Quantity, i.UnitPrice)).ToList(),
-                    s.Shipment is null ? null : new ShipmentView(s.Shipment.Carrier, s.Shipment.TrackingNumber, s.Shipment.ShippedAt, s.Shipment.DeliveredAt))).ToList());
+            return MapOrder(orderId is { } id ? await api.GetOrderAsync(id, ct) : await api.GetOrderByNumberAsync(number!, ct));
         }, notFound: $"Sipariş bulunamadı ({label})");
     }
+
+    private static OrderView MapOrder(OrderDetailDto o) =>
+        new(o.Id, o.OrderNumber, o.Status, o.TotalAmount, o.Currency, o.CreatedAt, o.PaidAt, o.ShippedAt, o.DeliveredAt,
+            o.ShippingAddress,
+            (o.SellerOrders ?? []).Select(s => new SellerOrderView(s.Id, s.SellerName, s.Status, s.Total,
+                (s.Items ?? []).Select(i => new OrderItemView(i.ProductName, i.Quantity, i.UnitPrice)).ToList(),
+                s.Shipment is null ? null : new ShipmentView(s.Shipment.Carrier, s.Shipment.TrackingNumber, s.Shipment.ShippedAt, s.Shipment.DeliveredAt))).ToList());
+
+    private static CartView MapCart(CartDto c) =>
+        new(c.CartTotal, (c.Items ?? []).Select(i => new CartItemView(i.CartItemId, i.ListingId, i.ProductName, i.UnitPrice, i.Quantity, i.LineTotal)).ToList());
+
+    [McpServerTool(Name = "get_cart", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Hesabın sepetini (kalemler, birim fiyat, adet, satır ve genel toplam) getirir.")]
+    public Task<string> GetCart(CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+        MapCart(await api.GetCartAsync(ct)));
+
+    [McpServerTool(Name = "add_to_cart", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Bir listing'i sepete ekler (aynı listing tekrar eklenirse adet artabilir) ve güncel sepeti döndürür.")]
+    public Task<string> AddToCart(
+        [Description("Listing no (search_listings sonucundaki listingId).")] int listingId,
+        [Description("Adet, 1 ile 99 arası. Varsayılan: 1.")] int quantity = 1,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        ToolInput.Require(quantity is >= 1 and <= 99, "quantity 1 ile 99 arasında olmalı.");
+        var session = await tokens.GetSessionAsync(ct);
+        return MapCart(await api.AddToCartAsync(session.UserId, listingId, quantity, ct));
+    }, notFound: $"Listing bulunamadı (id={listingId})");
+
+    [McpServerTool(Name = "update_cart_item", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Sepetteki bir kalemin adedini ayarlar ve güncel sepeti döndürür. Kalemi silmek için remove_from_cart kullanın.")]
+    public Task<string> UpdateCartItem(
+        [Description("Sepet kalemi no (get_cart sonucundaki cartItemId).")] int cartItemId,
+        [Description("Yeni adet, en az 1.")] int quantity,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        ToolInput.Require(quantity >= 1, "Miktarı 0 yapmak için remove_from_cart kullanın.");
+        var session = await tokens.GetSessionAsync(ct);
+        return MapCart(await api.UpdateCartItemAsync(session.UserId, cartItemId, quantity, ct));
+    }, notFound: $"Sepet kalemi bulunamadı (id={cartItemId})");
+
+    [McpServerTool(Name = "remove_from_cart", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Sepetten bir kalemi çıkarır ve güncel sepeti döndürür.")]
+    public Task<string> RemoveFromCart(
+        [Description("Sepet kalemi no (get_cart sonucundaki cartItemId).")] int cartItemId,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        var session = await tokens.GetSessionAsync(ct);
+        return MapCart(await api.RemoveCartItemAsync(session.UserId, cartItemId, ct));
+    }, notFound: $"Sepet kalemi bulunamadı (id={cartItemId})");
+
+    [McpServerTool(Name = "place_order", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Sepetteki ürünlerle sipariş oluşturur ve ödemeyi kapıda ödeme (CashOnDelivery) olarak kaydeder. Kart bilgisi istenmez ve alınmaz. " +
+                 "Kullanıcı sepeti, teslimat adresini ve toplam tutarı açıkça onaylamadan ÇAĞIRMAYIN. Başarısız olursa siparişi tekrar oluşturmayın; get_order ile kontrol edin.")]
+    public Task<string> PlaceOrder(
+        [Description("Teslimat adresi no (list_my_addresses sonucundaki addressId).")] int shippingAddressId,
+        [Description("Fatura adresi no. Boşsa teslimat adresi kullanılır.")] int? billingAddressId = null,
+        [Description("Satıcıya iletilecek sipariş notu (en çok 1000 karakter). İsteğe bağlı.")] string? note = null,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        var order = await api.CheckoutAsync(shippingAddressId, billingAddressId, string.IsNullOrWhiteSpace(note) ? null : note.Trim(), ct);
+        PaymentIntentDto intent;
+        try
+        {
+            intent = await api.CreateCashOnDeliveryIntentAsync(order.Id, ct);
+        }
+        catch (Exception error)
+        {
+            var translated = ToolErrors.Translate(error, options);
+            if (translated is OperationCanceledException)
+            {
+                throw;
+            }
+
+            throw new McpException(
+                $"Sipariş oluşturuldu ({order.OrderNumber}, id={order.Id}) ancak kapıda ödeme kaydı oluşturulamadı: {translated.Message}. " +
+                "Siparişi tekrar oluşturmayın; get_order ile durumu kontrol edin.", error);
+        }
+
+        return new PlacedOrderView(order.Id, order.OrderNumber, order.Status, order.TotalAmount, order.Currency,
+            (order.SellerOrders ?? []).Select(s => new PlacedSellerOrderView(s.Id, s.SellerName, s.Total)).ToList(),
+            new PaymentView("CashOnDelivery", intent.Status));
+    }, notFound: "Adres veya sepet bulunamadı");
+
+    [McpServerTool(Name = "cancel_order", ReadOnly = false, Destructive = true, Idempotent = false, OpenWorld = false)]
+    [Description("Bir siparişi iptal eder (geri alınamaz; kargoya verilmiş siparişler iptal edilemez). İptalden önce kullanıcıdan onay alın. Güncel sipariş ayrıntısını döndürür.")]
+    public Task<string> CancelOrder(
+        [Description("Sipariş no (sayı).")] int orderId,
+        [Description("İptal nedeni: CustomerRequest, OutOfStock, PaymentFailed, FraudSuspected, SellerCancelled, DeliveryIssue, Other. Varsayılan: CustomerRequest.")] string? reason = "CustomerRequest",
+        [Description("İptal notu (en çok 500 karakter). İsteğe bağlı.")] string? note = null,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        var why = ToolInput.OneOf(reason, "reason", CancelReasons, "CustomerRequest")!;
+        return MapOrder(await api.CancelOrderAsync(orderId, why, string.IsNullOrWhiteSpace(note) ? null : note.Trim(), ct));
+    }, notFound: $"Sipariş bulunamadı (id={orderId})");
+
+    private sealed record CartItemView(int CartItemId, int ListingId, string? ProductName, decimal UnitPrice, int Quantity, decimal LineTotal);
+    private sealed record CartView(decimal Total, IReadOnlyList<CartItemView> Items);
+    private sealed record PlacedSellerOrderView(int SellerOrderId, string? SellerName, decimal Total);
+    private sealed record PaymentView(string Method, string? Status);
+    private sealed record PlacedOrderView(int OrderId, string? OrderNumber, string? Status, decimal TotalAmount, string? Currency, IReadOnlyList<PlacedSellerOrderView> SellerOrders, PaymentView Payment);
 
     private sealed record SearchItemView(int ListingId, string? ProductName, decimal Price, int Stock, string? StockStatus, string? Condition, string? Seller, string? Category);
     private sealed record SearchView(int Page, int TotalPages, int TotalCount, IReadOnlyList<SearchItemView> Items);
