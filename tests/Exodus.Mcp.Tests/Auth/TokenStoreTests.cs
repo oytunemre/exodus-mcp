@@ -14,7 +14,7 @@ public class TokenStoreTests
     private static readonly CancellationToken Ct = CancellationToken.None;
 
     private const string BadPasswordMessage =
-        "Exodus girişi başarısız: Invalid credentials. EXODUS_USERNAME/EXODUS_PASSWORD değerlerini düzeltip MCP sunucusunu yeniden başlatın.";
+        "Exodus girişi reddetti: Invalid credentials. Exodus mesajını kontrol edin; gerekirse EXODUS_USERNAME/EXODUS_PASSWORD değerlerini düzeltip sunucuyu yeniden başlatın.";
 
     [Fact]
     public async Task LazyLogin_NoRequestUntilFirstUse()
@@ -155,6 +155,19 @@ public class TokenStoreTests
         messages.Should().Equal(Enumerable.Repeat(BadPasswordMessage, 4));
         messages.Should().NotContain(m => m.Contains(Password));
         fake.Count(HttpMethod.Post, LoginPath).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task LockedAccount_DetailEndingWithDot_DoesNotProduceDoubleDot()
+    {
+        const string detail = "Account is locked. Try again in 5 minutes.";
+        var fake = new FakeExodusHandler().On(HttpMethod.Post, LoginPath, HttpStatusCode.Unauthorized, new { detail });
+        using var sp = Build(fake, new ManualTimeProvider(Start));
+        var store = sp.GetRequiredService<TokenStore>();
+
+        var error = await FluentActions.Awaiting(() => store.GetSessionAsync(Ct)).Should().ThrowAsync<ExodusAuthException>();
+
+        error.Which.Message.Should().Contain(detail.TrimEnd('.')).And.NotContain("..").And.NotContain(Password);
     }
 
     [Fact]

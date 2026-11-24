@@ -5,7 +5,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 // stdout carries only MCP messages. Every log line, the host's lifetime messages included, goes to stderr.
-var builder = Host.CreateApplicationBuilder(args);
+var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+{
+    Args = args,
+    // Claude Desktop launches servers with cwd "/": resolve content root (and its config files) next to the binary.
+    ContentRootPath = AppContext.BaseDirectory,
+});
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(console => console.LogToStandardErrorThreshold = LogLevel.Trace);
 

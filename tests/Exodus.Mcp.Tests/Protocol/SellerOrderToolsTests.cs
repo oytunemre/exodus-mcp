@@ -43,7 +43,7 @@ public class SellerOrderToolsTests
         item.GetProperty("orderNumber").GetString().Should().Be("ORD-1");
         item.GetProperty("status").GetString().Should().Be("Confirmed");
         item.GetProperty("total").GetDecimal().Should().Be(100m);
-        item.GetProperty("itemCount").GetInt32().Should().Be(1);
+        item.GetProperty("itemCount").GetInt32().Should().Be(2); // sum of quantities (one line, quantity 2)
     }
 
     [Fact]
@@ -178,6 +178,31 @@ public class SellerOrderToolsTests
 
         outcome.IsError.Should().BeTrue();
         outcome.Text.Should().Contain("Shipment yok. Önce ship yap.");
+    }
+
+    [Fact]
+    public async Task MarkDelivered_Success_PatchesThenRefetchesDeliveredOrder()
+    {
+        var delivered = new
+        {
+            id = 12, orderId = 4, orderNumber = "ORD-12", createdAt = "2026-11-10T08:00:00", sellerId = 3, sellerName = "Mağaza", status = "Delivered", total = 100m,
+            items = new[] { new { id = 1, listingId = 5, productId = 2, productName = "Kulaklık X", quantity = 2, unitPrice = 50m, totalPrice = 100m } },
+            shipment = new { id = 9, carrier = "Yurtiçi", trackingNumber = "TR123", shippedAt = "2026-11-11T09:00:00", deliveredAt = "2026-11-12T10:00:00" },
+        };
+        var (host, fake) = await StartAsync(f => f
+            .On(HttpMethod.Patch, "/api/shipments/seller-orders/12/deliver", HttpStatusCode.OK, new { message = "Delivered" })
+            .On(HttpMethod.Get, "/api/seller/orders/12", HttpStatusCode.OK, delivered)
+            .On(HttpMethod.Get, "/api/shipments/seller-orders/12/timeline", HttpStatusCode.OK, Array.Empty<object>()));
+        await using var scope = host;
+
+        var outcome = await host.CallAsync("mark_delivered", new() { ["sellerOrderId"] = 12 });
+
+        outcome.IsError.Should().BeFalse(outcome.Text);
+        fake.Requests.Where(r => r.PathAndQuery != "/api/auth/login").Select(r => $"{r.Method} {r.PathAndQuery}")
+            .Should().Equal("PATCH /api/shipments/seller-orders/12/deliver", "GET /api/seller/orders/12", "GET /api/shipments/seller-orders/12/timeline");
+        using var json = JsonDocument.Parse(outcome.Text);
+        json.RootElement.GetProperty("status").GetString().Should().Be("Delivered");
+        json.RootElement.GetProperty("shipment").GetProperty("deliveredAt").GetString().Should().StartWith("2026-11-12T10:00:00");
     }
 
     [Fact]

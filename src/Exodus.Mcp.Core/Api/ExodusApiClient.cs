@@ -5,7 +5,10 @@ namespace Exodus.Mcp.Core.Api;
 
 public sealed partial class ExodusApiClient(HttpClient http)
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new UtcDateTimeConverter() },
+    };
 
     internal async Task<T> SendAsync<T>(HttpMethod method, string relativePath, object? jsonBody, CancellationToken ct)
     {

@@ -94,6 +94,6 @@ public class PromptsAndResourcesTests
         var act = async () => await host.Client.ReadResourceAsync("exodus://categories");
 
         var error = await act.Should().ThrowAsync<ModelContextProtocol.McpException>();
-        error.Which.Message.Should().NotContain("boom");
+        error.Which.Message.Should().NotContain("boom").And.Contain("Exodus beklenmeyen bir hata döndürdü (HTTP 500)");
     }
 }

@@ -37,8 +37,8 @@ public sealed class SellerTools(ExodusApiClient api, ExodusOptions options, Time
                 var low = (await api.GetLowStockAsync(ct)).Select(MapLow).ToList();
                 return new FilterView<LowItemView>(filter, null, null, low.Count, low);
             case "out":
-                var out_ = (await api.GetOutOfStockAsync(ct)).Select(MapOut).ToList();
-                return new FilterView<OutItemView>(filter, null, null, out_.Count, out_);
+                var outOfStock = (await api.GetOutOfStockAsync(ct)).Select(MapOut).ToList();
+                return new FilterView<OutItemView>(filter, null, null, outOfStock.Count, outOfStock);
             default:
                 var result = await api.GetMyListingsAsync(isActive, page, PageSize, ct);
                 var totalPages = result.TotalPages > 0 ? result.TotalPages : (int)Math.Ceiling(result.TotalCount / (double)PageSize);
@@ -214,7 +214,7 @@ public sealed class SellerTools(ExodusApiClient api, ExodusOptions options, Time
             var batch = await api.GetSellerOrdersAsync(null, page, SummaryPageSize, ct);
             collected.AddRange(batch);
             if (batch.Count < SummaryPageSize
-                || batch.Min(o => SalesSummaryCalculator.ToUtc(o.CreatedAt)) < rangeStart)
+                || batch.Min(o => o.CreatedAt) < rangeStart)
             {
                 break;
             }
@@ -235,7 +235,7 @@ public sealed class SellerTools(ExodusApiClient api, ExodusOptions options, Time
         var timeline = order.Shipment is null
             ? null
             : (await api.GetShipmentTimelineAsync(sellerOrderId, ct))
-                .Select(e => new TimelineView(e.Status, SalesSummaryCalculator.ToUtc(e.CreatedAt))).ToList();
+                .Select(e => new TimelineView(e.Status, e.CreatedAt)).ToList();
         return MapOrder(order, timeline);
     }
 
@@ -244,14 +244,14 @@ public sealed class SellerTools(ExodusApiClient api, ExodusOptions options, Time
     private static string NotOwned(int id) => $"Bu satıcı siparişi size ait değil (id={id})";
 
     private static OrderListItemView MapListItem(SellerOrderDto o) =>
-        new(o.Id, o.OrderNumber, o.Status, o.Total, o.Items?.Count ?? 0, SalesSummaryCalculator.ToUtc(o.CreatedAt));
+        new(o.Id, o.OrderNumber, o.Status, o.Total, o.Items?.Sum(i => i.Quantity) ?? 0, o.CreatedAt);
 
     private static OrderView MapOrder(SellerOrderDto o, IReadOnlyList<TimelineView>? timeline) =>
-        new(o.Id, o.OrderNumber, o.Status, o.Total, SalesSummaryCalculator.ToUtc(o.CreatedAt),
+        new(o.Id, o.OrderNumber, o.Status, o.Total, o.CreatedAt,
             (o.Items ?? []).Select(i => new OrderLineView(i.ListingId, i.ProductName, i.Quantity, i.UnitPrice, i.TotalPrice)).ToList(),
             o.Shipment is null ? null : new ShipmentView(o.Shipment.Carrier, o.Shipment.TrackingNumber,
-                o.Shipment.ShippedAt is { } s ? SalesSummaryCalculator.ToUtc(s) : null,
-                o.Shipment.DeliveredAt is { } d ? SalesSummaryCalculator.ToUtc(d) : null),
+                o.Shipment.ShippedAt,
+                o.Shipment.DeliveredAt),
             timeline);
 
     private sealed record OrderListItemView(int SellerOrderId, string? OrderNumber, string? Status, decimal Total, int ItemCount, DateTime CreatedAt);

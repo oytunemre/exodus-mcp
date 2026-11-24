@@ -127,7 +127,7 @@ public sealed class TokenStore(IHttpClientFactory httpClientFactory, ExodusOptio
         _session = current with
         {
             AccessToken = body.AccessToken,
-            AccessTokenExpiresAtUtc = AsUtc(expiresAt),
+            AccessTokenExpiresAtUtc = UtcDateTimeConverter.Normalize(expiresAt),
             RefreshToken = body.RefreshToken,
         };
         logger.LogDebug("Exodus access token refreshed.");
@@ -146,7 +146,7 @@ public sealed class TokenStore(IHttpClientFactory httpClientFactory, ExodusOptio
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
             var detail = (await ExodusApiException.FromResponseAsync(response, ct)).Detail ?? "(ayrıntı yok)";
-            throw Latch($"Exodus girişi başarısız: {detail}. EXODUS_USERNAME/EXODUS_PASSWORD değerlerini düzeltip MCP sunucusunu yeniden başlatın.");
+            throw Latch($"Exodus girişi reddetti: {detail.TrimEnd('.')}. Exodus mesajını kontrol edin; gerekirse EXODUS_USERNAME/EXODUS_PASSWORD değerlerini düzeltip sunucuyu yeniden başlatın.");
         }
 
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
@@ -180,7 +180,7 @@ public sealed class TokenStore(IHttpClientFactory httpClientFactory, ExodusOptio
             throw new InvalidOperationException("Exodus login response did not contain an access token.");
         }
 
-        _session = new AuthSession(body.UserId, role, body.Token, AsUtc(expiresAt), body.RefreshToken);
+        _session = new AuthSession(body.UserId, role, body.Token, UtcDateTimeConverter.Normalize(expiresAt), body.RefreshToken);
         logger.LogInformation("Logged in to Exodus as {Username} with role {Role}.", body.Username ?? options.Username, role);
         return _session;
     }
@@ -201,12 +201,4 @@ public sealed class TokenStore(IHttpClientFactory httpClientFactory, ExodusOptio
             throw new ExodusAuthException(_latchedFailure, permanent: true);
         }
     }
-
-    // Exodus (SQL Server datetime2) may omit the 'Z': an unspecified kind means UTC.
-    private static DateTime AsUtc(DateTime value) => value.Kind switch
-    {
-        DateTimeKind.Utc => value,
-        DateTimeKind.Local => value.ToUniversalTime(),
-        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
-    };
 }

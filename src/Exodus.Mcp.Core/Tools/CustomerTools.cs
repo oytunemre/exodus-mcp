@@ -175,7 +175,7 @@ public sealed class CustomerTools(ExodusApiClient api, ExodusOptions options, To
             }
 
             throw new McpException(
-                $"Sipariş oluşturuldu ({order.OrderNumber}, id={order.Id}) ancak kapıda ödeme kaydı oluşturulamadı: {translated.Message}. " +
+                $"Sipariş oluşturuldu ({order.OrderNumber}, id={order.Id}) ancak kapıda ödeme kaydı oluşturulamadı: {translated.Message.TrimEnd('.')}. " +
                 "Siparişi tekrar oluşturmayın; get_order ile durumu kontrol edin.", error);
         }
 

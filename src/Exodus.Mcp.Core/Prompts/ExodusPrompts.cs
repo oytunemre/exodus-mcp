@@ -20,7 +20,7 @@ public sealed class CustomerPrompts
             "3. Benim seçtiğim ürünü add_to_cart ile sepete ekle.\n" +
             "4. list_my_addresses ile teslimat adresini teyit et.\n" +
             "5. get_cart ile sepeti göster; sepet, adres ve toplam tutarın özetini sun.\n" +
-            "6. Ben açıkça onay vermeden asla place_order çağırma; özetin ardından onayımı (onay) bekle.\n" +
+            "6. Ben açıkça onay vermeden asla place_order çağırma; özetin ardından açık onayımı bekle.\n" +
             "Kart bilgisi isteme; ödeme yalnızca kapıda ödemedir.";
 
         return string.IsNullOrWhiteSpace(goal) ? text : $"{text}\n\nHedefim: {goal.Trim()}";

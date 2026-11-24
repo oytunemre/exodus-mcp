@@ -65,6 +65,21 @@ public class CustomerWriteToolsTests
     }
 
     [Fact]
+    public async Task UpdateCartItem_PutsQuantityToUserItemPath_AndReturnsCart()
+    {
+        var (host, fake) = await StartAsync(f => f.On(HttpMethod.Put, "/api/cart/7/item/11", HttpStatusCode.OK, Cart));
+        await using var _ = host;
+
+        var outcome = await host.CallAsync("update_cart_item", new() { ["cartItemId"] = 11, ["quantity"] = 3 });
+
+        outcome.IsError.Should().BeFalse(outcome.Text);
+        fake.Requests.Single(r => r.Method == "PUT" && r.PathAndQuery == "/api/cart/7/item/11").Body.Should().Be("{\"quantity\":3}");
+        using var json = JsonDocument.Parse(outcome.Text);
+        json.RootElement.GetProperty("total").GetDecimal().Should().Be(200m);
+        json.RootElement.GetProperty("items")[0].GetProperty("cartItemId").GetInt32().Should().Be(11);
+    }
+
+    [Fact]
     public async Task RemoveFromCart_UsesUserIdInPath()
     {
         var (host, fake) = await StartAsync(f => f.On(HttpMethod.Delete, "/api/cart/7/item/11", HttpStatusCode.OK, Cart));
@@ -114,7 +129,7 @@ public class CustomerWriteToolsTests
         var outcome = await host.CallAsync("place_order", new() { ["shippingAddressId"] = 2 });
 
         outcome.IsError.Should().BeTrue();
-        outcome.Text.Should().Contain("ORD-2025-0009").And.Contain("tekrar oluşturmayın");
+        outcome.Text.Should().Contain("ORD-2025-0009").And.Contain("tekrar oluşturmayın").And.NotContain("..");
         fake.Count(HttpMethod.Post, "/api/order/checkout").Should().Be(1);
     }
 

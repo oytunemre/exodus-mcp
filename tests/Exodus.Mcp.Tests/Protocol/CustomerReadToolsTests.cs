@@ -203,6 +203,10 @@ public class CustomerReadToolsTests
         seller.GetProperty("sellerOrderId").GetInt32().Should().Be(4);
         seller.GetProperty("items")[0].GetProperty("quantity").GetInt32().Should().Be(2);
         seller.GetProperty("shipment").GetProperty("trackingNumber").GetString().Should().Be("TR123");
+        // The fake Exodus sends no zone; the output must be explicit UTC.
+        root.GetProperty("createdAt").GetString().Should().EndWith("Z");
+        root.GetProperty("paidAt").GetString().Should().EndWith("Z");
+        seller.GetProperty("shipment").GetProperty("shippedAt").GetString().Should().EndWith("Z");
     }
 
     [Fact]

@@ -189,6 +189,43 @@ public class SellerListingToolsTests
     }
 
     [Fact]
+    public async Task UpdateStock_PatchesAbsoluteQuantity_AndReturnsStock()
+    {
+        var (host, fake) = await StartAsync(f => f.On(HttpMethod.Patch, "/api/seller/listings/5/stock", HttpStatusCode.OK,
+            new { message = "Stock updated", stockQuantity = 25, stockStatus = "InStock" }));
+        await using var hostScope = host;
+
+        var outcome = await host.CallAsync("update_stock", new() { ["listingId"] = 5, ["stockQuantity"] = 25 });
+
+        outcome.IsError.Should().BeFalse(outcome.Text);
+        fake.Requests.Single(r => r.Method == "PATCH" && r.PathAndQuery == "/api/seller/listings/5/stock").Body.Should().Be("{\"stockQuantity\":25}");
+        using var json = JsonDocument.Parse(outcome.Text);
+        json.RootElement.GetProperty("listingId").GetInt32().Should().Be(5);
+        json.RootElement.GetProperty("stock").GetInt32().Should().Be(25);
+        json.RootElement.GetProperty("stockStatus").GetString().Should().Be("InStock");
+    }
+
+    [Fact]
+    public async Task ListMyListings_OutFilter_UsesOutOfStockRoute()
+    {
+        var (host, fake) = await StartAsync(f => f.On(HttpMethod.Get, "/api/seller/listings/out-of-stock", HttpStatusCode.OK,
+            new[] { new { id = 5, productId = 2, productName = "Kulaklık X", sku = (string?)null, isActive = true } }));
+        await using var hostScope = host;
+
+        var outcome = await host.CallAsync("list_my_listings", new() { ["stockFilter"] = "out" });
+
+        outcome.IsError.Should().BeFalse(outcome.Text);
+        fake.Count(HttpMethod.Get, "/api/seller/listings/out-of-stock").Should().Be(1);
+        using var json = JsonDocument.Parse(outcome.Text);
+        json.RootElement.GetProperty("filter").GetString().Should().Be("out");
+        json.RootElement.GetProperty("totalCount").GetInt32().Should().Be(1);
+        var item = json.RootElement.GetProperty("items")[0];
+        item.GetProperty("listingId").GetInt32().Should().Be(5);
+        item.GetProperty("productName").GetString().Should().Be("Kulaklık X");
+        item.GetProperty("isActive").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
     public async Task UpdateStock_Negative_IsErrorWithoutRequest()
     {
         var (host, fake) = await StartAsync(_ => { });
