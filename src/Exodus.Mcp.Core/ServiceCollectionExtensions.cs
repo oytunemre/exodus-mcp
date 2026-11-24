@@ -1,4 +1,6 @@
 using Exodus.Mcp.Core.Configuration;
+using Exodus.Mcp.Core.Prompts;
+using Exodus.Mcp.Core.Resources;
 using Exodus.Mcp.Core.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
@@ -39,16 +41,18 @@ public static class ServiceCollectionExtensions
 
         builder.WithTools<CommonTools>();
 
+        builder.WithResources<CatalogResources>();
+
         // Each WithTools<T>/WithPrompts<T>/WithResources<T> registers only that type, so a profile exposes nothing else.
         switch (options.Profile)
         {
             case ExodusProfile.Customer:
                 builder.WithTools<CustomerTools>();
-                // Customer prompts and resources go here.
+                builder.WithPrompts<CustomerPrompts>();
                 break;
             case ExodusProfile.Seller:
                 builder.WithTools<SellerTools>();
-                // Seller prompts and resources go here.
+                builder.WithPrompts<SellerPrompts>();
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(options), options.Profile, "Unknown Exodus profile.");
