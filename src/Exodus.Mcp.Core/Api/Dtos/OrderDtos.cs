@@ -8,9 +8,9 @@ public sealed record OrderListItemDto(int Id, string? OrderNumber, string? Statu
 /// <summary>Response of <c>GET api/order/{id}</c> and <c>GET api/order/number/{orderNumber}</c>.</summary>
 public sealed record OrderDetailDto(
     int Id, string? OrderNumber, string? Status, decimal TotalAmount, string? Currency, string? ShippingAddress,
-    DateTime CreatedAt, DateTime? PaidAt, DateTime? ShippedAt, DateTime? DeliveredAt, List<SellerOrderDto>? SellerOrders);
+    DateTime CreatedAt, DateTime? PaidAt, DateTime? ShippedAt, DateTime? DeliveredAt, List<OrderSellerPartDto>? SellerOrders);
 
-public sealed record SellerOrderDto(int Id, string? SellerName, string? Status, decimal Total, List<OrderItemDto>? Items, ShipmentInfoDto? Shipment);
+public sealed record OrderSellerPartDto(int Id, string? SellerName, string? Status, decimal Total, List<OrderItemDto>? Items, ShipmentInfoDto? Shipment);
 
 public sealed record OrderItemDto(string? ProductName, int Quantity, decimal UnitPrice);
 

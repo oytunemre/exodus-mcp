@@ -8,12 +8,15 @@ using ModelContextProtocol.Server;
 
 namespace Exodus.Mcp.Core.Tools;
 
-/// <summary>Seller-profile tools (listing management).</summary>
+/// <summary>Seller-profile tools (listing and order management).</summary>
 [McpServerToolType]
-public sealed class SellerTools(ExodusApiClient api, ExodusOptions options)
+public sealed class SellerTools(ExodusApiClient api, ExodusOptions options, TimeProvider time)
 {
     private const int PageSize = 20;
     private static readonly string[] StockFilters = ["all", "low", "out"];
+    private const int SummaryPageSize = 100;
+    private const int SummaryMaxPages = 20;
+    private static readonly string[] OrderStatuses = ["Pending", "Confirmed", "Processing", "Shipped", "Delivered", "Cancelled"];
     private static readonly string[] Conditions = ["New", "LikeNew", "Used", "Refurbished"];
 
     [McpServerTool(Name = "list_my_listings", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
@@ -131,6 +134,133 @@ public sealed class SellerTools(ExodusApiClient api, ExodusOptions options)
         var result = await api.UpdateStockAsync(listingId, stockQuantity, ct);
         return new StockView(listingId, result.StockQuantity, result.StockStatus);
     }, notFound: $"Listing bulunamadı ya da size ait değil (id={listingId})");
+
+    [McpServerTool(Name = "list_seller_orders", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Satıcının siparişlerini listeler, en yeniden eskiye (sayfa başına 20). status: Pending (onay bekliyor), Confirmed, Processing, Shipped, Delivered, Cancelled; boşsa hepsi. " +
+                 "hasMore true ise sonraki sayfayı page ile isteyin.")]
+    public Task<string> ListSellerOrders(
+        [Description("Durum filtresi: Pending (onay bekliyor), Confirmed, Processing, Shipped, Delivered, Cancelled. Boşsa hepsi.")] string? status = null,
+        [Description("Sayfa numarası, 1'den başlar. Varsayılan: 1.")] int page = 1,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        var filter = ToolInput.OneOf(status, "status", OrderStatuses);
+        ToolInput.Require(page >= 1, "page en az 1 olmalı.");
+
+        var orders = await api.GetSellerOrdersAsync(filter, page, PageSize, ct);
+        return new OrderListView(page, orders.Count == PageSize, orders.Select(MapListItem).ToList());
+    });
+
+    [McpServerTool(Name = "get_seller_order", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Tek bir satıcı siparişinin kalemlerini, kargo bilgisini ve (kargolandıysa) kargo geçmişini döndürür.")]
+    public Task<string> GetSellerOrder(
+        [Description("Satıcı sipariş no (list_seller_orders sonucundaki sellerOrderId).")] int sellerOrderId,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, () => LoadOrderViewAsync(sellerOrderId, ct),
+        notFound: OrderNotFound(sellerOrderId));
+
+    [McpServerTool(Name = "confirm_order", ReadOnly = false, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Onay bekleyen (Pending) satıcı siparişini onaylar ve güncel sipariş görünümünü döndürür.")]
+    public Task<string> ConfirmOrder(
+        [Description("Satıcı sipariş no.")] int sellerOrderId,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        await api.ConfirmSellerOrderAsync(sellerOrderId, ct);
+        return await LoadOrderViewAsync(sellerOrderId, ct);
+    }, notFound: OrderNotFound(sellerOrderId), forbidden: NotOwned(sellerOrderId));
+
+    [McpServerTool(Name = "ship_order", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Satıcı siparişini kargoya verildi olarak işaretler. carrier (kargo firması) ve trackingNumber (takip no) boş olamaz. Güncel sipariş görünümünü döndürür.")]
+    public Task<string> ShipOrder(
+        [Description("Satıcı sipariş no.")] int sellerOrderId,
+        [Description("Kargo firması, boş olamaz.")] string carrier,
+        [Description("Kargo takip numarası, boş olamaz.")] string trackingNumber,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        ToolInput.Require(!string.IsNullOrWhiteSpace(carrier), "carrier boş olamaz.");
+        ToolInput.Require(!string.IsNullOrWhiteSpace(trackingNumber), "trackingNumber boş olamaz.");
+
+        await api.ShipSellerOrderAsync(sellerOrderId, carrier.Trim(), trackingNumber.Trim(), ct);
+        return await LoadOrderViewAsync(sellerOrderId, ct);
+    }, notFound: OrderNotFound(sellerOrderId), forbidden: NotOwned(sellerOrderId));
+
+    [McpServerTool(Name = "mark_delivered", ReadOnly = false, Destructive = false, Idempotent = false, OpenWorld = false)]
+    [Description("Kargolanmış satıcı siparişini teslim edildi olarak işaretler. Sipariş henüz kargolanmadıysa Exodus'un hata mesajı döner. Güncel sipariş görünümünü döndürür.")]
+    public Task<string> MarkDelivered(
+        [Description("Satıcı sipariş no.")] int sellerOrderId,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        await api.MarkDeliveredAsync(sellerOrderId, ct);
+        return await LoadOrderViewAsync(sellerOrderId, ct);
+    }, notFound: OrderNotFound(sellerOrderId), forbidden: NotOwned(sellerOrderId));
+
+    [McpServerTool(Name = "sales_summary", ReadOnly = true, Destructive = false, Idempotent = true, OpenWorld = false)]
+    [Description("Tarih aralığındaki satış özeti: sipariş sayısı, ciro (iptaller hariç), durum dağılımı ve en çok satan 5 listing. " +
+                 "Tarihler yyyy-MM-dd (UTC), uçlar dahil. Varsayılan: toDate bugün, fromDate toDate'ten 29 gün önce. En fazla 2000 sipariş taranır; fazlaysa truncated=true.")]
+    public Task<string> SalesSummary(
+        [Description("Başlangıç tarihi, yyyy-MM-dd. Varsayılan: toDate - 29 gün.")] string? fromDate = null,
+        [Description("Bitiş tarihi, yyyy-MM-dd (dahil). Varsayılan: bugün (UTC).")] string? toDate = null,
+        CancellationToken ct = default) => ToolErrors.RunAsync(options, async () =>
+    {
+        var to = string.IsNullOrWhiteSpace(toDate)
+            ? DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime)
+            : ToolInput.Date(toDate, "toDate");
+        var from = string.IsNullOrWhiteSpace(fromDate) ? to.AddDays(-29) : ToolInput.Date(fromDate, "fromDate");
+        ToolInput.Require(from <= to, "fromDate, toDate'ten sonra olamaz.");
+
+        var rangeStart = new DateTime(from.Year, from.Month, from.Day, 0, 0, 0, DateTimeKind.Utc);
+        var collected = new List<SellerOrderDto>();
+        var truncated = false;
+        for (var page = 1; ; page++)
+        {
+            var batch = await api.GetSellerOrdersAsync(null, page, SummaryPageSize, ct);
+            collected.AddRange(batch);
+            if (batch.Count < SummaryPageSize
+                || batch.Min(o => SalesSummaryCalculator.ToUtc(o.CreatedAt)) < rangeStart)
+            {
+                break;
+            }
+
+            if (page >= SummaryMaxPages)
+            {
+                truncated = true;
+                break;
+            }
+        }
+
+        return SalesSummaryCalculator.Calculate(collected, from, to, truncated);
+    });
+
+    private async Task<OrderView> LoadOrderViewAsync(int sellerOrderId, CancellationToken ct)
+    {
+        var order = await api.GetSellerOrderAsync(sellerOrderId, ct);
+        var timeline = order.Shipment is null
+            ? null
+            : (await api.GetShipmentTimelineAsync(sellerOrderId, ct))
+                .Select(e => new TimelineView(e.Status, SalesSummaryCalculator.ToUtc(e.CreatedAt))).ToList();
+        return MapOrder(order, timeline);
+    }
+
+    private static string OrderNotFound(int id) => $"Satıcı siparişi bulunamadı (id={id})";
+
+    private static string NotOwned(int id) => $"Bu satıcı siparişi size ait değil (id={id})";
+
+    private static OrderListItemView MapListItem(SellerOrderDto o) =>
+        new(o.Id, o.OrderNumber, o.Status, o.Total, o.Items?.Count ?? 0, SalesSummaryCalculator.ToUtc(o.CreatedAt));
+
+    private static OrderView MapOrder(SellerOrderDto o, IReadOnlyList<TimelineView>? timeline) =>
+        new(o.Id, o.OrderNumber, o.Status, o.Total, SalesSummaryCalculator.ToUtc(o.CreatedAt),
+            (o.Items ?? []).Select(i => new OrderLineView(i.ListingId, i.ProductName, i.Quantity, i.UnitPrice, i.TotalPrice)).ToList(),
+            o.Shipment is null ? null : new ShipmentView(o.Shipment.Carrier, o.Shipment.TrackingNumber,
+                o.Shipment.ShippedAt is { } s ? SalesSummaryCalculator.ToUtc(s) : null,
+                o.Shipment.DeliveredAt is { } d ? SalesSummaryCalculator.ToUtc(d) : null),
+            timeline);
+
+    private sealed record OrderListItemView(int SellerOrderId, string? OrderNumber, string? Status, decimal Total, int ItemCount, DateTime CreatedAt);
+    private sealed record OrderListView(int Page, bool HasMore, IReadOnlyList<OrderListItemView> Items);
+    private sealed record OrderLineView(int ListingId, string? ProductName, int Quantity, decimal UnitPrice, decimal TotalPrice);
+    private sealed record ShipmentView(string? Carrier, string? TrackingNumber, DateTime? ShippedAt, DateTime? DeliveredAt);
+    private sealed record TimelineView(string? Status, DateTime At);
+    private sealed record OrderView(int SellerOrderId, string? OrderNumber, string? Status, decimal Total, DateTime CreatedAt,
+        IReadOnlyList<OrderLineView> Items, ShipmentView? Shipment, IReadOnlyList<TimelineView>? Timeline);
 
     private static AllItemView MapAll(SellerListingItemDto i) =>
         new(i.Id, i.ProductName, i.Price, i.StockQuantity, i.StockStatus, i.LowStockThreshold, i.Condition, i.IsActive);

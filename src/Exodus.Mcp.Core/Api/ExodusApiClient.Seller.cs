@@ -39,4 +39,29 @@ public sealed partial class ExodusApiClient
     /// <summary><c>PATCH api/seller/listings/{id}/stock</c>: sets the absolute stock.</summary>
     public Task<SellerStockDto> UpdateStockAsync(int id, int stockQuantity, CancellationToken ct)
         => SendAsync<SellerStockDto>(HttpMethod.Patch, $"api/seller/listings/{id}/stock", new { stockQuantity }, ct);
+
+    /// <summary><c>GET api/seller/orders?status=&amp;page=&amp;pageSize=</c>: a bare array, newest first.</summary>
+    public async Task<IReadOnlyList<SellerOrderDto>> GetSellerOrdersAsync(string? status, int page, int pageSize, CancellationToken ct)
+        => await SendAsync<List<SellerOrderDto>>(HttpMethod.Get,
+            QueryString.Build("api/seller/orders", ("status", status), ("page", page), ("pageSize", pageSize)), jsonBody: null, ct);
+
+    /// <summary><c>GET api/seller/orders/{id}</c>.</summary>
+    public Task<SellerOrderDto> GetSellerOrderAsync(int id, CancellationToken ct)
+        => SendAsync<SellerOrderDto>(HttpMethod.Get, $"api/seller/orders/{id}", jsonBody: null, ct);
+
+    /// <summary><c>GET api/shipments/seller-orders/{id}/timeline</c>: a bare array.</summary>
+    public Task<List<SellerShipmentEventDto>> GetShipmentTimelineAsync(int sellerOrderId, CancellationToken ct)
+        => SendAsync<List<SellerShipmentEventDto>>(HttpMethod.Get, $"api/shipments/seller-orders/{sellerOrderId}/timeline", jsonBody: null, ct);
+
+    /// <summary><c>POST api/seller/orders/{id}/confirm</c>.</summary>
+    public Task ConfirmSellerOrderAsync(int id, CancellationToken ct)
+        => SendAsync(HttpMethod.Post, $"api/seller/orders/{id}/confirm", jsonBody: null, ct);
+
+    /// <summary><c>POST api/seller/orders/{id}/ship</c>.</summary>
+    public Task ShipSellerOrderAsync(int id, string carrier, string trackingNumber, CancellationToken ct)
+        => SendAsync(HttpMethod.Post, $"api/seller/orders/{id}/ship", new { carrier, trackingNumber }, ct);
+
+    /// <summary><c>PATCH api/shipments/seller-orders/{id}/deliver</c>.</summary>
+    public Task MarkDeliveredAsync(int id, CancellationToken ct)
+        => SendAsync(HttpMethod.Patch, $"api/shipments/seller-orders/{id}/deliver", jsonBody: null, ct);
 }
