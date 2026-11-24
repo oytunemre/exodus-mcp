@@ -8,6 +8,9 @@ public sealed class ExodusOptions
 {
     public const string DefaultBaseUrl = "http://localhost:5013";
 
+    private const string BaseUrlPartsProblem =
+        "EXODUS_BASE_URL kullanıcı adı/şifre, query ya da fragment içermemeli; yalnızca şema, host, port ve yol kullanın.";
+
     public required Uri BaseUrl { get; init; }
     public required ExodusProfile Profile { get; init; }
     public required string Username { get; init; }
@@ -38,10 +41,19 @@ public sealed class ExodusOptions
 
         var rawBaseUrl = Read(configuration, "EXODUS_BASE_URL") ?? DefaultBaseUrl;
         Uri? baseUrl = null;
-        if (!Uri.TryCreate(rawBaseUrl, UriKind.Absolute, out baseUrl)
-            || (baseUrl.Scheme != Uri.UriSchemeHttp && baseUrl.Scheme != Uri.UriSchemeHttps))
+        if (!Uri.TryCreate(rawBaseUrl, UriKind.Absolute, out baseUrl))
         {
-            problems.Add($"EXODUS_BASE_URL geçerli bir http(s) adresi olmalı (gelen: '{rawBaseUrl}').");
+            // An '@' may mean credentials: never echo such a value.
+            problems.Add(rawBaseUrl.Contains('@') ? BaseUrlPartsProblem : InvalidBaseUrlProblem(rawBaseUrl));
+        }
+        else if (baseUrl.UserInfo.Length > 0 || baseUrl.Query.Length > 0 || baseUrl.Fragment.Length > 0)
+        {
+            // The base URL is printed by whoami and by error messages, so it must not carry a password.
+            problems.Add(BaseUrlPartsProblem);
+        }
+        else if (baseUrl.Scheme != Uri.UriSchemeHttp && baseUrl.Scheme != Uri.UriSchemeHttps)
+        {
+            problems.Add(InvalidBaseUrlProblem(rawBaseUrl));
         }
 
         if (problems.Count > 0)
@@ -61,6 +73,9 @@ public sealed class ExodusOptions
     }
 
     public override string ToString() => $"Profile={Profile}, BaseUrl={BaseUrl}, Username={Username}";
+
+    private static string InvalidBaseUrlProblem(string rawBaseUrl)
+        => $"EXODUS_BASE_URL geçerli bir http(s) adresi olmalı (gelen: '{rawBaseUrl}').";
 
     private static string? Read(IConfiguration configuration, string key)
     {

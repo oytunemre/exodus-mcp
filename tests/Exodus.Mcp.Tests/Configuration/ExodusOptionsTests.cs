@@ -63,6 +63,44 @@ public class ExodusOptionsTests
     }
 
     [Fact]
+    public void RejectsBaseUrlWithUserInfo_WithoutEchoingSecret()
+    {
+        var act = () => ExodusOptions.FromConfiguration(Build(
+            ("EXODUS_BASE_URL", "http://user:S3cret!@h:1/"),
+            ("EXODUS_PROFILE", "customer"), ("EXODUS_USERNAME", "u"), ("EXODUS_PASSWORD", "p")));
+
+        var message = act.Should().Throw<ExodusConfigurationException>().Which.Message;
+        message.Should().Contain("EXODUS_BASE_URL kullanıcı adı/şifre, query ya da fragment içermemeli; yalnızca şema, host, port ve yol kullanın.");
+        message.Should().NotContain("S3cret!");
+    }
+
+    [Theory]
+    [InlineData("ftp://user:S3cret!@h:1/")]
+    [InlineData("http://user:S3cret!@")]
+    public void RejectsInvalidBaseUrlWithCredentials_WithoutEchoingSecret(string baseUrl)
+    {
+        var act = () => ExodusOptions.FromConfiguration(Build(
+            ("EXODUS_BASE_URL", baseUrl),
+            ("EXODUS_PROFILE", "customer"), ("EXODUS_USERNAME", "u"), ("EXODUS_PASSWORD", "p")));
+
+        var message = act.Should().Throw<ExodusConfigurationException>().Which.Message;
+        message.Should().Contain("EXODUS_BASE_URL").And.NotContain("S3cret!");
+    }
+
+    [Theory]
+    [InlineData("http://h:1/x?y=1")]
+    [InlineData("http://h:1/#f")]
+    public void RejectsBaseUrlWithQueryOrFragment(string baseUrl)
+    {
+        var act = () => ExodusOptions.FromConfiguration(Build(
+            ("EXODUS_BASE_URL", baseUrl),
+            ("EXODUS_PROFILE", "customer"), ("EXODUS_USERNAME", "u"), ("EXODUS_PASSWORD", "p")));
+
+        act.Should().Throw<ExodusConfigurationException>()
+            .Which.Message.Should().Contain("EXODUS_BASE_URL kullanıcı adı/şifre, query ya da fragment içermemeli; yalnızca şema, host, port ve yol kullanın.");
+    }
+
+    [Fact]
     public void ToString_NeverContainsPassword()
     {
         var options = ExodusOptions.FromConfiguration(Build(
