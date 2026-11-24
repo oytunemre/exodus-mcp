@@ -14,6 +14,7 @@ public sealed class FakeExodusHandler : HttpMessageHandler
 
     private readonly object _gate = new();
     private readonly Dictionary<(string Method, string Path), Queue<Canned>> _responses = new();
+    private readonly Dictionary<(string Method, string Path), Queue<Exception>> _throws = new();
     private readonly List<RecordedRequest> _requests = [];
 
     public IReadOnlyList<RecordedRequest> Requests
@@ -35,7 +36,25 @@ public sealed class FakeExodusHandler : HttpMessageHandler
     public FakeExodusHandler OnRaw(HttpMethod method, string pathAndQuery, HttpStatusCode status, string? body, string contentType = "application/json")
         => Enqueue(method, pathAndQuery, new Canned(status, body, contentType, null));
 
-    public FakeExodusHandler WithLogin(string role = "Customer", int userId = 7, string token = "access-1", DateTime? expiresAtUtc = null, string refreshToken = "refresh-1")
+    /// <summary>
+    /// The next request to (method, path) throws <paramref name="error"/> (e.g. a connection failure);
+    /// later requests get the queued responses. The failed attempt is still recorded in <see cref="Requests"/>.
+    /// </summary>
+    public FakeExodusHandler OnThrow(HttpMethod method, string pathAndQuery, Exception error)
+    {
+        lock (_gate)
+        {
+            var key = (method.Method, pathAndQuery);
+            if (!_throws.TryGetValue(key, out var queue))
+            {
+                _throws[key] = queue = new Queue<Exception>();
+            }
+            queue.Enqueue(error);
+        }
+        return this;
+    }
+
+    public FakeExodusHandler WithLogin(string role = "Customer", int userId = 7, string token = "access-1", DateTime? expiresAtUtc = null, string refreshToken = "refresh-1", TimeSpan? delay = null)
     {
         var expires = expiresAtUtc ?? DateTime.UtcNow.AddHours(24);
         return On(HttpMethod.Post, "/api/auth/login", HttpStatusCode.OK, new
@@ -50,7 +69,7 @@ public sealed class FakeExodusHandler : HttpMessageHandler
             refreshToken,
             refreshTokenExpiresAt = DateTime.UtcNow.AddDays(7),
             twoFactorRequired = false,
-        });
+        }, delay);
     }
 
     private FakeExodusHandler Enqueue(HttpMethod method, string pathAndQuery, Canned canned)
@@ -72,15 +91,25 @@ public sealed class FakeExodusHandler : HttpMessageHandler
         var pathAndQuery = request.RequestUri!.PathAndQuery;
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
         Canned? canned = null;
+        Exception? error = null;
 
         lock (_gate)
         {
             _requests.Add(new RecordedRequest(request.Method.Method, pathAndQuery, request.Headers.Authorization?.ToString(), body));
-            if (_responses.TryGetValue((request.Method.Method, pathAndQuery), out var queue) && queue.Count > 0)
+            if (_throws.TryGetValue((request.Method.Method, pathAndQuery), out var errors) && errors.Count > 0)
+            {
+                error = errors.Dequeue();
+            }
+            else if (_responses.TryGetValue((request.Method.Method, pathAndQuery), out var queue) && queue.Count > 0)
             {
                 // The last response repeats once the queue is down to one item.
                 canned = queue.Count > 1 ? queue.Dequeue() : queue.Peek();
             }
+        }
+
+        if (error is not null)
+        {
+            throw error;
         }
 
         if (canned is null)
