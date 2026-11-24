@@ -43,7 +43,8 @@ public static class ServiceCollectionExtensions
         switch (options.Profile)
         {
             case ExodusProfile.Customer:
-                // Customer tools, prompts and resources go here.
+                builder.WithTools<CustomerTools>();
+                // Customer prompts and resources go here.
                 break;
             case ExodusProfile.Seller:
                 // Seller tools, prompts and resources go here.
