@@ -34,3 +34,7 @@ internal sealed class RefreshResponse
     public DateTime? AccessTokenExpiresAt { get; init; }
     public string? RefreshToken { get; init; }
 }
+
+// A record is safe here: none of these fields is a secret.
+/// <summary>Response of <c>GET api/auth/me</c>. Exodus sends <c>userId</c> as a string.</summary>
+public sealed record MeDto(string UserId, string? Username, string? Email, string? Role);

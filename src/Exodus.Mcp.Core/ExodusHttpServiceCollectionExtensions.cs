@@ -8,7 +8,8 @@ namespace Exodus.Mcp.Core;
 
 public static class ExodusHttpServiceCollectionExtensions
 {
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
+    // Internal: the tools' timeout message quotes it.
+    internal static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Registers the Exodus HTTP stack: options, <see cref="TokenStore"/>, the <c>exodus-auth</c> client for
