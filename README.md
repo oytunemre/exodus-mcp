@@ -12,7 +12,7 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server, written in C
 flowchart LR
     C[Claude] -- "MCP over stdio" --> M["Exodus.Mcp.Stdio<br/>(console host)"]
     M --> K["Exodus.Mcp.Core<br/>tools, prompts, resources,<br/>API client, token store"]
-    K -- "HTTPS + JWT" --> A[Exodus API]
+    K -- "HTTP(S) + JWT" --> A[Exodus API]
     A --> S[(SQL Server)]
 ```
 
@@ -123,6 +123,8 @@ claude mcp add exodus-seller \
 }
 ```
 
+GUI apps such as Claude Desktop do not inherit your shell `PATH`. If `dotnet` is not found, use the absolute path from `which dotnet` as `command`.
+
 Startup is faster if you run `dotnet build` once and point the command at the built DLL instead of `dotnet run`: use `dotnet <path>/src/Exodus.Mcp.Stdio/bin/Debug/net10.0/Exodus.Mcp.Stdio.dll`.
 
 ### Environment variables
@@ -147,6 +149,7 @@ Invalid configuration makes the process print what is wrong to stderr and exit w
 - The access token is refreshed about a minute before it expires. The refresh token rotates, so the old one is dropped.
 - A `401` triggers exactly one renewal and one retry of the request (body buffered so the retry is identical). A second `401` is returned as is.
 - There is no retry loop on login failure. Exodus locks an account after 5 failed attempts and rate-limits auth to 10 requests per minute. So login and refresh run under one lock, and a permanent failure (bad credentials, wrong role, 2FA) is remembered and returned on later calls without another request.
+- Exodus applies its auth rate limit (10/min/IP) to the whole AuthController, including `GET /api/auth/me`, so `whoami` shares that budget with login and refresh.
 - An account with 2FA enabled is rejected with a clear message, and so is a role that does not match the profile.
 - Passwords and tokens are kept out of `ToString()` output, logs and error messages.
 
