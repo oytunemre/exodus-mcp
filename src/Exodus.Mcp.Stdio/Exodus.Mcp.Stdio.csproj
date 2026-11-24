@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Exodus.Mcp.Stdio</AssemblyName>
+    <RootNamespace>Exodus.Mcp.Stdio</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Exodus.Mcp.Core\Exodus.Mcp.Core.csproj" />
+  </ItemGroup>
+
+</Project>

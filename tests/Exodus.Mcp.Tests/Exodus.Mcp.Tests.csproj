@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Exodus.Mcp.Core\Exodus.Mcp.Core.csproj" />
+    <ProjectReference Include="..\..\src\Exodus.Mcp.Stdio\Exodus.Mcp.Stdio.csproj" />
   </ItemGroup>
 
 </Project>
