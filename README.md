@@ -16,7 +16,7 @@ flowchart LR
     A --> S[(SQL Server)]
 ```
 
-`Exodus.Mcp.Core` has no dependency on a host or a transport. Phase 2 therefore adds only an HTTP host project.
+`Exodus.Mcp.Core` has no dependency on a host or a transport. Phase 2 adds an HTTP host project; the tools, prompts and API client carry over, and only the auth layer changes (see [Roadmap](#roadmap)).
 
 | Project | Role |
 |---|---|
@@ -158,7 +158,7 @@ Invalid configuration makes the process print what is wrong to stderr and exit w
 
 Building a client that exercises the API end to end showed real problems in Exodus. I fixed them in the API, with tests, before relying on it:
 
-- Payment simulation endpoints were open to any caller; they now require order ownership or an admin: [`bc6c569`](https://github.com/oytunemre/Exodus/commit/bc6c569), [`332e913`](https://github.com/oytunemre/Exodus/commit/332e913) (the 3DS simulator is admin-only and Development-only).
+- Any authenticated user could call the payment authorize, capture, refund and simulate-success/fail endpoints, and could act on payment intents of other users' orders; those five are now Admin-only (the simulators also Development-only) and the intent endpoints check order ownership: [`bc6c569`](https://github.com/oytunemre/Exodus/commit/bc6c569). The 3DS confirm simulator is now Admin-only and Development-only too: [`332e913`](https://github.com/oytunemre/Exodus/commit/332e913).
 - A seller could act on other sellers' orders and shipments through a legacy controller; ownership is now enforced and that controller is removed: [`fdd9b73`](https://github.com/oytunemre/Exodus/commit/fdd9b73), [`0f85116`](https://github.com/oytunemre/Exodus/commit/0f85116) (shipping and delivery only through the shipment endpoints).
 - The anonymous payment webhook never checked a signature, so anyone could post `payment.captured` or `payment.refunded`; it now verifies `X-Webhook-Signature` and returns 401 without changing state: [`22aaf4d`](https://github.com/oytunemre/Exodus/commit/22aaf4d).
 - A payment result could regress or revive an order (for example a cancelled one); success and failure now move only a Pending order: [`47c5550`](https://github.com/oytunemre/Exodus/commit/47c5550).
@@ -193,4 +193,4 @@ npx @modelcontextprotocol/inspector dotnet run --project src/Exodus.Mcp.Stdio
 
 ## Roadmap
 
-**Phase 2: HTTP transport with pass-through JWT.** A second host project serving MCP over HTTP, where the caller's own Exodus JWT is forwarded instead of a configured username and password. Because `Exodus.Mcp.Core` is host-independent, the tools, prompts and API client carry over unchanged.
+**Phase 2: HTTP transport with pass-through JWT.** A new HTTP host project serves MCP over HTTP and forwards the caller's own Exodus JWT instead of logging in with a configured username and password. The tools, prompts and API client carry over. The auth layer (`TokenStore`, `ExodusAuthHandler`, `ExodusOptions` and the DI wiring) is swapped for per-request bearer-token forwarding, because today it assumes one configured account per process.
